@@ -1,0 +1,71 @@
+version: "3"
+
+vars:
+  BOOTLOADER_BIN: "bin/bootloader.efi"
+  KERNEL_BIN: "bin/kernel"
+  IMAGE_NAME: "bin/zos.img"
+  ISO_NAME: "bin/zos.iso"
+  QEMU_ARCH: "x86_64"
+  DEV_MODE: false
+  ZIG_VERSION: "latest" # latest ou nightly
+
+tasks:
+  install:
+    desc: Installe les dépendances nécessaires
+    cmds:
+      # Installation de ZVM et Zig
+      - |
+        if ! command -v zvm &>/dev/null; then
+          echo "Installation de ZVM..."
+          curl -fsSL https://raw.githubusercontent.com/tristanisham/zvm/master/install.sh | bash
+          source ~/.bashrc
+        fi
+        zvm upgrade
+
+        if [[ '{{.ZIG_VERSION}}' == 'latest' ]]; then
+          LATEST_ZIG=$(curl -s https://api.github.com/repos/ziglang/zig/releases/latest | grep -oP '"tag_name": "v?\K([\d.]+)')
+          echo "Installation de Zig ${LATEST_ZIG}"
+          zvm install "${LATEST_ZIG}" && zvm use "${LATEST_ZIG}"
+        else
+          echo "Installation de Zig nightly"
+          zvm install master && zvm use master
+        fi
+
+      # Installation des dépendances système
+      - |
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+          brew install qemu xorriso
+        else
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 xorriso
+        fi
+
+  build:
+    desc: Compile le projet
+    cmds:
+      - zig build
+
+  run:
+    desc: Exécute le système dans QEMU
+    cmds:
+      - zig build run
+
+  clean:
+    desc: Nettoie les fichiers générés
+    cmds:
+      - rm -rf bin/*
+
+  run-dev:
+    desc: Lance l'OS dans QEMU en mode dev
+    cmds:
+      - |
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+          qemu-system-{{.QEMU_ARCH}} -hda {{.IMAGE_NAME}}
+        else
+          qemu-system-{{.QEMU_ARCH}} -hda {{.IMAGE_NAME}} -accel kvm
+        fi
+
+  iso:
+    desc: Crée une image ISO bootable
+    cmds:
+      - xorriso -as mkisofs -R -f -e {{.IMAGE_NAME}} -no-emul-boot -o {{.ISO_NAME}}
